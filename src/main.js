@@ -10,8 +10,28 @@ const {
   screen,
 } = require('electron');
 
-// Load .env from the project root (works in dev and when packaged).
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+// Load .env. Search the most useful locations so it works both in dev and
+// when packaged: next to the .exe first (where a user would drop their key),
+// then the resources dir, the project root (dev), and finally userData.
+const fs = require('fs');
+(function loadEnv() {
+  const candidates = [
+    path.join(path.dirname(app.getPath('exe')), '.env'),
+    process.resourcesPath ? path.join(process.resourcesPath, '.env') : null,
+    path.join(__dirname, '..', '.env'),
+    path.join(app.getPath('userData'), '.env'),
+  ].filter(Boolean);
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        require('dotenv').config({ path: p });
+        console.log('[env] loaded', p);
+        return;
+      }
+    } catch { /* ignore */ }
+  }
+  console.warn('[env] no .env found — set OPENAI_API_KEY next to the app');
+})();
 
 const OpenAI = require('openai');
 const winInput = require('./win-input');
@@ -59,7 +79,10 @@ function applyStealth(win) {
 }
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
-const API_KEY = process.env.OPENAI_API_KEY || '';
+let API_KEY = process.env.OPENAI_API_KEY || '';
+// Ignore the placeholder from .env.example so a missing key shows the proper
+// "no key" hint instead of failing later with a 401.
+if (API_KEY.includes('your-key-here')) API_KEY = '';
 
 let openai = null;
 if (API_KEY) {
