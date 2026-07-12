@@ -75,4 +75,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('input:key', handler);
     return () => ipcRenderer.removeListener('input:key', handler);
   },
+  // macOS: Accessibility permission not yet granted (typing capture disabled)
+  onNeedAccessibility: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('input:needAccessibility', handler);
+    return () => ipcRenderer.removeListener('input:needAccessibility', handler);
+  },
 });

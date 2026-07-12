@@ -525,6 +525,11 @@ function applyMode(mode) {
 
 window.api.onInputMode(applyMode);
 
+window.api.onNeedAccessibility(() => {
+  composerHint.textContent =
+    '⚠ Grant Accessibility to Stealth Chat (System Settings → Privacy & Security → Accessibility), then reopen — enables stealth typing.';
+});
+
 window.api.onCaptureState((cap) => {
   capturing = cap;
   composerInner.classList.toggle('capturing', cap);
@@ -564,9 +569,15 @@ sendBtn.addEventListener('click', send);
 snipBtn.addEventListener('click', () => window.api.startSnip());
 $('#newChatBtn').addEventListener('click', newChat);
 
-// After a capture-safe snip, the image is on the clipboard.
-window.api.onSnipCopied(() => {
-  composerHint.textContent = '📸 Snip copied — press Ctrl+V to attach it.';
+// After a capture-safe snip, the image is on the clipboard (or an error, e.g.
+// macOS Screen Recording permission not granted yet).
+const PASTE = navigator.platform.toLowerCase().includes('mac') ? '⌘V' : 'Ctrl+V';
+window.api.onSnipCopied((payload) => {
+  if (payload && payload.error) {
+    composerHint.textContent = '⚠ ' + payload.error;
+    return;
+  }
+  composerHint.textContent = `📸 Snip copied — press ${PASTE} to attach it.`;
   focusInput();
 });
 
@@ -644,7 +655,16 @@ document.addEventListener('pointermove', onDragMove);
 document.addEventListener('pointerup', endDrag);
 
 // ---------- boot ----------
+function localizeShortcuts() {
+  // Show ⌘ instead of Ctrl in the on-screen hints on macOS.
+  if (!navigator.platform.toLowerCase().includes('mac')) return;
+  document.querySelectorAll('.hint, .empty-state p').forEach((el) => {
+    el.textContent = el.textContent.replace(/Ctrl/g, '⌘');
+  });
+}
+
 async function boot() {
+  localizeShortcuts();
   load();
   if (chats.length === 0) {
     newChat();

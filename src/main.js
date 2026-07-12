@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const {
   app,
   BrowserWindow,
@@ -8,58 +9,50 @@ const {
   clipboard,
   nativeImage,
   screen,
+  systemPreferences,
+  shell,
 } = require('electron');
 
-// Load .env from the project root (works in dev and when packaged).
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+// Load .env from the most useful location, working in dev and when packaged:
+// beside the .app bundle first, then resources, the dev project root, and
+// finally ~/Library/Application Support/Stealth Chat.
+(function loadEnv() {
+  const exeDir = path.dirname(app.getPath('exe'));
+  const candidates = [];
+  // exe = Foo.app/Contents/MacOS/Foo  →  .env beside Foo.app
+  candidates.push(path.join(exeDir, '..', '..', '..', '.env'));
+  candidates.push(path.join(exeDir, '.env'));
+  if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, '.env'));
+  candidates.push(path.join(__dirname, '..', '.env'));
+  candidates.push(path.join(app.getPath('userData'), '.env'));
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        require('dotenv').config({ path: p });
+        console.log('[env] loaded', p);
+        return;
+      }
+    } catch { /* ignore */ }
+  }
+  console.warn('[env] no .env found — set OPENAI_API_KEY (see README)');
+})();
 
 const OpenAI = require('openai');
-const winInput = require('./win-input');
-
-// --- Win32 capture-exclusion via direct SetWindowDisplayAffinity ---
-// Electron's setContentProtection can fall back to WDA_MONITOR (leaks to
-// some screenshot paths). We force WDA_EXCLUDEFROMCAPTURE, which removes the
-// window from ALL capture (screen share, recording, Snipping Tool, PrtScn).
-const WDA_NONE = 0x00000000;
-const WDA_MONITOR = 0x00000001;
-const WDA_EXCLUDEFROMCAPTURE = 0x00000011; // Windows 10 2004+ / Windows 11
-
-let setDisplayAffinity = null;
-if (process.platform === 'win32') {
-  try {
-    const koffi = require('koffi');
-    const user32 = koffi.load('user32.dll');
-    setDisplayAffinity = user32.func(
-      'bool __stdcall SetWindowDisplayAffinity(uint64 hwnd, uint32 dwAffinity)'
-    );
-  } catch (e) {
-    console.error('[stealth] koffi/user32 unavailable:', e.message);
-  }
-}
+const macInput = require('./mac-input');
+const { convertToPanel } = require('./mac-panel');
 
 function applyStealth(win) {
   if (!win || win.isDestroyed()) return;
-
-  // Electron's own protection (belt & suspenders / covers non-Windows).
+  // macOS: setContentProtection(true) → NSWindowSharingNone, which excludes
+  // the window from every screen capture / recording / share.
   win.setContentProtection(true);
-
-  if (process.platform === 'win32' && setDisplayAffinity) {
-    const hbuf = win.getNativeWindowHandle(); // pointer-sized buffer
-    const hwnd = hbuf.length === 8 ? hbuf.readBigUInt64LE(0)
-                                   : BigInt(hbuf.readUInt32LE(0));
-    let ok = setDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-    if (!ok) {
-      // Older Windows: fall back to the monitor-blocking mode.
-      ok = setDisplayAffinity(hwnd, WDA_MONITOR);
-      console.warn('[stealth] EXCLUDEFROMCAPTURE failed; WDA_MONITOR:', ok);
-    } else {
-      console.log('[stealth] WDA_EXCLUDEFROMCAPTURE applied (hwnd ' + hwnd + ')');
-    }
-  }
 }
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
-const API_KEY = process.env.OPENAI_API_KEY || '';
+let API_KEY = process.env.OPENAI_API_KEY || '';
+// Ignore the placeholder from .env.example so a missing key shows the proper
+// "no key" hint instead of failing later with a 401.
+if (API_KEY.includes('your-key-here')) API_KEY = '';
 
 let openai = null;
 if (API_KEY) {
@@ -104,15 +97,19 @@ function createWindow() {
   // === STEALTH === exclude the window from ALL screen capture.
   applyStealth(mainWindow);
 
+  // macOS: make it a non-activating panel so typing here never activates our
+  // app over the one being shared (no app-level focus steal).
+  convertToPanel(mainWindow);
+
   // Keep it floating above the app you are screen-sharing.
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
   // Do not steal focus from the shared app when shown.
   mainWindow.setVisibleOnAllWorkspaces(true);
 
-  // Re-assert the capture-exclusion whenever the window re-appears; some
-  // window state transitions can reset display affinity.
-  mainWindow.on('show', () => applyStealth(mainWindow));
+  // Re-assert the capture-exclusion (+ panel style on macOS) whenever the
+  // window re-appears; some state transitions can reset these.
+  mainWindow.on('show', () => { applyStealth(mainWindow); convertToPanel(mainWindow); });
   mainWindow.on('restore', () => applyStealth(mainWindow));
   mainWindow.on('focus', () => applyStealth(mainWindow));
 
@@ -125,6 +122,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.setOpacity(opacity);
+    convertToPanel(mainWindow);
     // Show WITHOUT activating so the previously-active window keeps focus.
     mainWindow.showInactive();
     applyStealth(mainWindow);
@@ -153,25 +151,38 @@ function toggleVisibility() {
   }
 }
 
-// Report the window's on-screen rectangle (physical px) to the hook helper.
-// The helper uses it only to RELEASE the keyboard when the user clicks fully
-// OUTSIDE our window. Enabling/disabling for in-window clicks is decided by
-// the renderer's DOM (pixel-perfect: only the prompt input bar grabs keys),
-// which is why clicking the title bar, window buttons, resize borders,
-// sidebar, or transcript never grabs the keyboard.
+// Report the window's on-screen rectangle (screen points) to the event tap.
+// It uses this only to RELEASE the keyboard when the user clicks fully OUTSIDE
+// our window; grabbing on in-window clicks is decided by the renderer's DOM.
 function pushWindowRect() {
   if (!hookMode || !mainWindow || mainWindow.isDestroyed()) return;
   try {
-    const phys = screen.dipToScreenRect(mainWindow, mainWindow.getBounds());
-    winInput.setRect(phys);
+    macInput.setRect(mainWindow.getBounds()); // points, matches CGEventGetLocation
   } catch { /* ignore */ }
 }
 
 // ---------- capture-safe region snip ----------
 let snipDisplay = null;
 
+// macOS requires the user to grant Screen Recording permission before
+// desktopCapturer returns real pixels. Returns true if we may proceed.
+function ensureScreenPermission() {
+  if (process.platform !== 'darwin') return true;
+  const status = systemPreferences.getMediaAccessStatus('screen');
+  if (status === 'granted') return true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('snip:copied', { error:
+      'Grant Screen Recording to Stealth Chat in System Settings → Privacy & Security → Screen Recording, then reopen the app.' });
+  }
+  shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+  ).catch(() => {});
+  return false;
+}
+
 function startSnip() {
   if (overlayWindow && !overlayWindow.isDestroyed()) return;
+  if (!ensureScreenPermission()) return;
 
   const point = screen.getCursorScreenPoint();
   snipDisplay = screen.getDisplayNearestPoint(point);
@@ -199,10 +210,12 @@ function startSnip() {
 
   // The selection UI itself must be invisible to system capture.
   applyStealth(overlayWindow);
+  convertToPanel(overlayWindow);
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
   overlayWindow.once('ready-to-show', () => {
     applyStealth(overlayWindow);
+    convertToPanel(overlayWindow);
     overlayWindow.show();
     overlayWindow.focus();
   });
@@ -262,23 +275,30 @@ ipcMain.handle('snip:capture', async (_e, rect) => {
     if (!mainWindow.isVisible()) mainWindow.showInactive();
     applyStealth(mainWindow);
     pushWindowRect();
-    if (hookMode) winInput.setCapture(true);
+    if (hookMode) macInput.setCapture(true);
     mainWindow.webContents.send('snip:copied', { dataUrl: cropped.toDataURL() });
   }
   return { ok: true };
 });
 
 app.whenReady().then(() => {
+  // macOS: run as an accessory (no Dock icon, never becomes the active app),
+  // reinforcing the non-activating panel so the shared app stays foreground.
+  if (process.platform === 'darwin' && app.setActivationPolicy) {
+    app.setActivationPolicy('accessory');
+  }
+
   createWindow();
 
-  // Start the low-level keyboard/mouse hook helper. When it's ready, the
-  // window becomes non-activating and all typing flows through the hook.
-  const started = winInput.start({
+  // Start the CGEventTap keyboard capture. When it's ready, typing flows
+  // through the tap (keys swallowed from the underlying app) into the
+  // fake-caret input, so the app being shared keeps its own focus.
+  const started = macInput.start({
     onReady: () => {
       hookMode = true;
-      console.log('[win-input] hook ready — typing via keyboard hook');
+      console.log('[mac-input] tap ready — typing via CGEventTap');
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setFocusable(false); // never steal focus → no blur
+        mainWindow.setFocusable(false); // window never becomes key → no blur
         applyStealth(mainWindow);
         pushWindowRect();
         mainWindow.webContents.send('input:mode', { mode: 'hook' });
@@ -294,19 +314,21 @@ app.whenReady().then(() => {
         mainWindow.webContents.send('input:key', evt);
       }
     },
-    onExit: (code) => {
-      hookMode = false;
-      // Helper died/unavailable: make the window focusable again so it can
-      // take real focus and fall back to a normal text box.
+    onNeedPermission: () => {
+      // Not trusted for Accessibility yet: open the pane and fall back to a
+      // normal focusable text box until the user grants + relaunches.
+      shell.openExternal(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+      ).catch(() => {});
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setFocusable(true);
         mainWindow.webContents.send('input:mode', { mode: 'native' });
+        mainWindow.webContents.send('input:needAccessibility');
       }
-      if (code) console.error('[win-input] helper exited with code', code);
     },
   });
   if (!started) {
-    // Non-Windows or spawn failure: native input mode.
+    // Tap unavailable (permission not granted, or non-macOS dev run):
+    // fall back to a normal focusable text box.
     if (mainWindow) mainWindow.webContents.send('input:mode', { mode: 'native' });
   }
 
@@ -327,11 +349,12 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  winInput.stop();
+  macInput.stop();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Single-window utility (accessory app on macOS): closing the window quits.
+  app.quit();
 });
 
 // --- Renderer asks whether a key is configured ---
@@ -343,7 +366,7 @@ ipcMain.handle('app:status', () => ({
 
 // --- Renderer toggles keyboard capture (grab/release the keyboard) ---
 ipcMain.on('input:capture', (_e, on) => {
-  if (hookMode) winInput.setCapture(Boolean(on));
+  if (hookMode) macInput.setCapture(Boolean(on));
 });
 
 

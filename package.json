@@ -5,10 +5,13 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --mac"
   },
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
@@ -21,12 +24,21 @@
   "build": {
     "appId": "com.stealth.chat",
     "productName": "Stealth Chat",
-    "files": [
-      "src/**/*",
-      "!**/*.map"
-    ],
-    "win": {
-      "target": "nsis"
+    "asar": false,
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "title": "Stealth Chat"
     }
   }
 }

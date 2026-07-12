@@ -1,76 +1,87 @@
-# Stealth Chat
+# Stealth Chat (macOS)
 
-A ChatGPT/Claude-style desktop AI assistant that is **invisible to screen sharing and screen recording**. Built with Electron + the OpenAI API.
+A ChatGPT/Claude-style desktop AI assistant for **macOS** that is **invisible to screen sharing and screen recording**. Built with Electron + the OpenAI API.
 
 ## Features
 
-- **Stealth window** — rendered normally on your monitor but black/absent in Zoom, Teams, Meet, OBS, Snipping Tool, and OS screen recording (`setContentProtection` → `WDA_EXCLUDEFROMCAPTURE` on Windows).
-- **Always-on-top**, so it floats over the app you are sharing.
-- **Panic hotkey** — `Ctrl + Shift + \` instantly hides/shows the window (works even when the app isn't focused).
-- **Sidebar** with a **New chat** button on top and your **chat history** below.
-- Each history item has a **⋯ menu** to **rename** or **delete** it.
-- Multi-chat: every chat keeps its own conversation context (full history is sent to the model, so replies stay on topic).
+- **Stealth window** — rendered normally on your Mac's display but black/absent in Zoom, Teams, Meet, QuickTime, OBS, and macOS screen recording, via Electron's `setContentProtection(true)` → `NSWindowSharingNone`.
+- **Non-activating panel** — the window is turned into a macOS *non-activating panel* and the app runs as an **accessory** (no Dock icon, not in ⌘-Tab), so clicking it never activates our app: the app you're sharing/using stays the foreground application.
+- **Stealth typing (CGEventTap)** — a global event tap captures your keystrokes into the chat and **swallows them** so they never reach the app underneath, which keeps *its* focus/caret. Requires the **Accessibility** permission (see below).
+- **Always-on-top**, floating over the app you're sharing (including full-screen spaces).
+- **Panic hotkey** — `⌘ + Shift + \` instantly hides/shows the window.
+- **Sidebar** with a **New chat** button on top and your **chat history** below; each item has a **⋯ menu** to rename or delete.
+- Multi-chat: each chat keeps its own conversation context.
 - **Streaming** responses, token by token.
-- **Translucent window** so you can see the app underneath. Adjust with `Ctrl+Shift+↑/↓`.
-- **Capture-safe region snip** (`Ctrl+Shift+S` or the ▢ button): drag to select an area. The selection overlay is itself invisible to screen capture, and the snip is copied to your clipboard. Press **Ctrl+V** in the chat input to attach it.
-- **Vision**: attached/pasted images are sent to the model (`gpt-4o`) so you can ask about screenshots.
-- **Non-activating window** — the window never takes focus, so the app you were using (call, editor, exam, game) **never fires a "focus lost" / blur event**. You type into the chat via a low-level keyboard hook that routes and *swallows* keys, so those keystrokes never reach the other app.
+- **Translucent window** so you can see what's underneath. Adjust with `⌘+Shift+↑/↓`.
+- **Capture-safe region snip** (`⌘+Shift+S` or the 📷 button): drag to select an area; the selection overlay is itself invisible to capture, and the snip is copied to your clipboard. Press **⌘V** in the chat input to attach it.
+- **Vision**: pasted/attached images are sent to `gpt-4o`, so you can ask about a screenshot.
 - **No login, no settings screen.** Just your API key in a local `.env` file.
 
-## How typing works (important)
+## How typing works
 
-Because the window is non-activating, you don't focus it the normal way:
+The window never takes focus, so you type like this:
 
-1. **Click anywhere inside the window.** A blinking caret appears — the app has "grabbed" the keyboard. The other window stays active the whole time (it never blurs).
-2. **Type / paste (Ctrl+V) / press Enter to send.** Those keys go *only* to the chat; the underlying app receives nothing.
-3. **Click anywhere outside the window, or press Esc, to release** the keyboard back to the real active window.
+1. **Click anywhere inside the window** — a blinking caret appears; the event tap now routes keys to the chat.
+2. **Type / ⌘V to paste / Enter to send.** Those keys are swallowed — the app underneath never receives them and keeps its own focus.
+3. **Click outside the window, or press Esc, to release** the keyboard back to the other app.
 
-To keep the underlying window from ever blurring, this window is **non-focusable** (`setFocusable(false)`). Because that disables the OS caption buttons on Windows, the app uses a **custom title bar**: minimize / maximize / close are driven over IPC, and drag-to-move + edge/corner resize are done manually (pointer capture → `setBounds`). All of it works while the window never takes focus.
-
-While the keyboard is grabbed (caret blinking), global shortcuts like `Ctrl+Shift+S` are suppressed — press **Esc** first to release, then use them. On non-Windows systems (or if the hook helper can't start) the app falls back to a normal focusable text box.
+If Accessibility isn't granted yet, the app falls back to a normal focusable text box (typing still works, but the app underneath will lose key focus while you type).
 
 ## Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+\` | Hide / show the window |
-| `Ctrl+Shift+S` | Snip a region (capture-safe) |
-| `Ctrl+V` | Attach the snipped/copied image to the input |
-| `Ctrl+Shift+↑` / `↓` | More / less opaque |
+| `⌘+Shift+\` | Hide / show the window |
+| `⌘+Shift+S` | Snip a region (capture-safe) |
+| `⌘V` | Attach the snipped/copied image to the input |
+| `⌘+Shift+↑` / `↓` | More / less opaque |
 | `Enter` / `Shift+Enter` | Send / newline |
 
-## Setup
+## Requirements
 
-1. Install dependencies (already done if you see `node_modules/`):
-   ```
-   npm install
-   ```
+- **A Mac to build and run on.** A macOS `.app`/`.dmg` can only be produced on macOS — it cannot be cross-compiled from Windows/Linux.
+- **Node.js 18+** and **Xcode Command Line Tools** (`xcode-select --install`) for `npm install` to build native deps.
+- macOS 11+ recommended.
 
-2. Add your OpenAI key. Copy the example and paste your key:
-   ```
-   copy .env.example .env
-   ```
-   Then open `.env` and set:
-   ```
-   OPENAI_API_KEY=sk-...your key...
-   OPENAI_MODEL=gpt-4o
-   ```
-   The `.env` file is git-ignored and never leaves your machine.
+## Setup & run (on your Mac)
 
-3. Run:
-   ```
-   npm start
-   ```
-
-## Build a standalone Windows .exe (optional)
-
+```bash
+npm install          # installs deps (koffi ships prebuilt macOS binaries)
+cp .env.example .env # then edit .env and paste your key
+npm start
 ```
+
+`.env`:
+```
+OPENAI_API_KEY=sk-...your key...
+OPENAI_MODEL=gpt-4o
+```
+
+## Build a macOS app
+
+```bash
 npm run dist
 ```
-The installer/executable is written to `dist/`.
+Produces, in `dist/`:
+- `Stealth Chat-1.0.0.dmg` — drag-to-Applications installer
+- `Stealth Chat-1.0.0-mac.zip` — zipped `.app`
 
-## Notes
+### Where to put your API key in the built app
+Place a `.env` file **next to `Stealth Chat.app`** (e.g. in the same folder, or in `/Applications`). The app searches, in order: beside the `.app` → resources → dev project → `~/Library/Application Support/Stealth Chat/.env`.
 
-- Default model is `gpt-4o`. Change `OPENAI_MODEL` in `.env` to switch (e.g. `gpt-4o-mini`).
-- Chat history is stored locally in the app's browser storage — nothing is uploaded anywhere except your prompts to OpenAI.
-- Screen-share invisibility depends on the OS compositor. It is reliable on Windows 10 2004+ / Windows 11 for standard capture (the whole point of `WDA_EXCLUDEFROMCAPTURE`). Hardware capture cards / photographing the screen obviously still see it.
+## Required macOS permissions
+
+Grant both under **System Settings → Privacy & Security**, then reopen the app:
+
+- **Accessibility** — lets the CGEventTap capture/swallow keystrokes (the stealth-typing feature). If not granted, the app opens this pane automatically and falls back to a normal text box until you enable it.
+- **Screen Recording** — needed for the snip/screenshot feature. On first snip the app opens the Screen Recording pane; enable *Stealth Chat*, then reopen.
+
+(The screen-share *invisibility* itself needs no permission.)
+
+## Notes & honest caveats
+
+- **Unsigned build** — the app isn't code-signed/notarized, so Gatekeeper will block the first launch. Right-click the app → **Open** (or `xattr -dr com.apple.quarantine "Stealth Chat.app"`). Signing/notarizing needs a paid Apple Developer account.
+- **Permissions & unsigned apps** — macOS may reset Accessibility/Screen-Recording grants for unsigned apps between rebuilds; you may need to remove and re-add *Stealth Chat* in the list after a new build.
+- **Screen-share invisibility** relies on the OS compositor; a **camera pointed at the screen** or some hardware capture devices can still see it.
+- Chat history is stored locally in the app's storage; nothing is uploaded except your prompts to OpenAI.
+- Default model is `gpt-4o`; change `OPENAI_MODEL` in `.env`.
