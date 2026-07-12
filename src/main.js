@@ -43,6 +43,7 @@ const { convertToPanel } = require('./mac-panel');
 
 function applyStealth(win) {
   if (!win || win.isDestroyed()) return;
+  if (!STEALTH_MODE) return; // Skip if stealth mode is disabled
   // macOS: setContentProtection(true) → NSWindowSharingNone, which excludes
   // the window from every screen capture / recording / share.
   win.setContentProtection(true);
@@ -53,6 +54,9 @@ let API_KEY = process.env.OPENAI_API_KEY || '';
 // Ignore the placeholder from .env.example so a missing key shows the proper
 // "no key" hint instead of failing later with a 401.
 if (API_KEY.includes('your-key-here')) API_KEY = '';
+
+// Stealth mode flag: when true, window is excluded from screen captures
+const STEALTH_MODE = process.env.STEALTH_MODE !== 'false';
 
 let openai = null;
 if (API_KEY) {

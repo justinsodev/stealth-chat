@@ -15,11 +15,11 @@ if (process.platform === 'darwin') {
     const objc = koffi.load('/usr/lib/libobjc.A.dylib');
 
     // SEL sel_registerName(const char *str)
-    const sel = objc.func('uint64 sel_registerName(const char* name)');
+    const sel = objc.func('sel_registerName', 'uint64', ['string']);
     // id objc_msgSend(id, SEL)  — return a pointer/NSUInteger
     const msgSend = objc.func('objc_msgSend', 'uint64', ['uint64', 'uint64']);
-    // void objc_msgSend(id, SEL, NSUInteger)  — setter with one integer arg
-    const msgSendSetU = objc.func('objc_msgSend', 'void', ['uint64', 'uint64', 'uint64']);
+    // void objc_msgSend(id, SEL, NSUInteger)  — setter with one integer arg (returns void)
+    const msgSendSetU = objc.func('objc_msgSend', 'uint64', ['uint64', 'uint64', 'uint64']);
 
     const SEL_window = sel('window');
     const SEL_styleMask = sel('styleMask');
@@ -31,24 +31,34 @@ if (process.platform === 'darwin') {
     // canJoinAllSpaces | stationary | ignoresCycle | fullScreenAuxiliary
     const COLLECTION_BEHAVIOR = (1n << 0n) | (1n << 4n) | (1n << 6n) | (1n << 8n);
 
+    let converting = false;
     convertToPanel = (win) => {
+      if (converting) return false;
+      converting = true;
       try {
         if (!win || win.isDestroyed()) return false;
         const hbuf = win.getNativeWindowHandle(); // NSView* on macOS
         if (!hbuf || hbuf.length < 8) return false;
-        const view = hbuf.readBigUInt64LE(0);
+        const view = Number(hbuf.readBigUInt64LE(0));
         if (!view) return false;
 
-        const nsWindow = BigInt(msgSend(view, SEL_window));
+        const nsWindow = Number(msgSend(view, SEL_window));
         if (!nsWindow) return false;
 
-        const mask = BigInt(msgSend(nsWindow, SEL_styleMask));
-        msgSendSetU(nsWindow, SEL_setStyleMask, mask | NS_NONACTIVATING_PANEL);
-        msgSendSetU(nsWindow, SEL_setCollectionBehavior, COLLECTION_BEHAVIOR);
+        // Skip setting the nonactivating panel style mask as NSWindow doesn't support it
+        // Instead, just set the collection behavior to make the window ignore focus cycle
+        try {
+          msgSendSetU(nsWindow, SEL_setCollectionBehavior, Number(COLLECTION_BEHAVIOR));
+        } catch (e) {
+          console.warn('[mac-panel] setCollectionBehavior failed:', e.message);
+        }
+        
         return true;
       } catch (e) {
         console.error('[mac-panel] convert failed:', e.message);
         return false;
+      } finally {
+        converting = false;
       }
     };
 
