@@ -54,6 +54,7 @@ While the keyboard is grabbed (caret blinking), global shortcuts like `Ctrl+Shif
    ```
    OPENAI_API_KEY=sk-...your key...
    OPENAI_MODEL=gpt-4o
+   STEALTH_MODE=TRUE
    ```
    The `.env` file is git-ignored and never leaves your machine.
 
@@ -72,5 +73,6 @@ The installer/executable is written to `dist/`.
 ## Notes
 
 - Default model is `gpt-4o`. Change `OPENAI_MODEL` in `.env` to switch (e.g. `gpt-4o-mini`).
+- **`STEALTH_MODE`** in `.env` toggles screen-share visibility: `TRUE` (default) hides the window from screen sharing/recording; `FALSE` makes it visible like a normal app. Takes effect on app restart.
 - Chat history is stored locally in the app's browser storage — nothing is uploaded anywhere except your prompts to OpenAI.
 - Screen-share invisibility depends on the OS compositor. It is reliable on Windows 10 2004+ / Windows 11 for standard capture (the whole point of `WDA_EXCLUDEFROMCAPTURE`). Hardware capture cards / photographing the screen obviously still see it.

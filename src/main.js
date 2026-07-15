@@ -57,23 +57,33 @@ if (process.platform === 'win32') {
   }
 }
 
+// STEALTH_MODE controls screen-share visibility.
+//   TRUE  (default, or unset) → window is hidden from screen sharing/recording
+//   FALSE                     → window is visible in screen shares like any app
+const STEALTH_ENABLED = !/^(0|false|no|off)$/i.test(
+  String(process.env.STEALTH_MODE ?? 'true').trim()
+);
+console.log('[stealth] STEALTH_MODE =', STEALTH_ENABLED ? 'ON (hidden)' : 'OFF (visible)');
+
 function applyStealth(win) {
   if (!win || win.isDestroyed()) return;
 
-  // Electron's own protection (belt & suspenders / covers non-Windows).
-  win.setContentProtection(true);
+  // Electron's own protection (also covers non-Windows). Off when disabled.
+  win.setContentProtection(STEALTH_ENABLED);
 
   if (process.platform === 'win32' && setDisplayAffinity) {
     const hbuf = win.getNativeWindowHandle(); // pointer-sized buffer
     const hwnd = hbuf.length === 8 ? hbuf.readBigUInt64LE(0)
                                    : BigInt(hbuf.readUInt32LE(0));
+    if (!STEALTH_ENABLED) {
+      setDisplayAffinity(hwnd, WDA_NONE); // visible to capture
+      return;
+    }
     let ok = setDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
     if (!ok) {
       // Older Windows: fall back to the monitor-blocking mode.
       ok = setDisplayAffinity(hwnd, WDA_MONITOR);
       console.warn('[stealth] EXCLUDEFROMCAPTURE failed; WDA_MONITOR:', ok);
-    } else {
-      console.log('[stealth] WDA_EXCLUDEFROMCAPTURE applied (hwnd ' + hwnd + ')');
     }
   }
 }
@@ -377,6 +387,11 @@ ipcMain.handle('clipboard:read', () => {
     return { type: 'image', dataUrl: img.toDataURL() };
   }
   return { type: 'text', text: clipboard.readText() || '' };
+});
+
+// --- Renderer writes text to the clipboard (Ctrl+C on a transcript selection) ---
+ipcMain.on('clipboard:write', (_e, text) => {
+  if (typeof text === 'string' && text.length) clipboard.writeText(text);
 });
 
 // --- Custom title-bar window controls (frameless window) ---

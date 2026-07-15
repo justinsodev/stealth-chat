@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('api', {
   // --- non-activating keyboard capture (hook mode) ---
   setCapture: (on) => ipcRenderer.send('input:capture', on),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text) => ipcRenderer.send('clipboard:write', text),
 
   // --- custom title bar: window controls + manual move/resize ---
   win: (action) => ipcRenderer.send('window:control', action),

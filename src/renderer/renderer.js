@@ -501,6 +501,13 @@ async function hookPaste() {
   }
 }
 
+// Ctrl+C while the input holds the keyboard: copy the current transcript
+// selection to the clipboard. If nothing is selected, do nothing.
+function hookCopy() {
+  const sel = window.getSelection ? String(window.getSelection()) : '';
+  if (sel && sel.trim()) window.api.writeClipboard(sel);
+}
+
 // Any click inside the window shows the caret (grabs the keyboard). Clicking
 // outside the window hides it (handled by the hook helper). Native window
 // controls (min/max/close, resize, title-bar drag) are non-client areas, so
@@ -551,6 +558,9 @@ window.api.onInputKey((evt) => {
       break;
     case 'paste':
       hookPaste();
+      break;
+    case 'copy':
+      hookCopy();
       break;
     case 'escape':
       // helper already released capture; state event will hide the caret

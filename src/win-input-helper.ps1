@@ -60,6 +60,7 @@ public class StealthHook {
         if(vk==0x14){ if(down) caps=!caps; return (IntPtr)1; }
         if(down){
           if(ctrl && vk==0x56){ Emit("KEY PASTE"); return (IntPtr)1; }
+          if(ctrl && vk==0x43){ Emit("KEY COPY"); return (IntPtr)1; }
           if(ctrl){ return (IntPtr)1; }
           if(vk==0x08){ Emit("KEY BACKSPACE"); return (IntPtr)1; }
           if(vk==0x0D){ Emit(shift ? "KEY SHIFTENTER" : "KEY ENTER"); return (IntPtr)1; }
